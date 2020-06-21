@@ -79,8 +79,8 @@ const int *__attribute__((optimize("O0"))) FPGA::qblockMV(Compute* comp)
 
 void FPGA::largeMV(const float *large_mat, const float *input, float *output, int num_input, int num_output, Compute* comp)
 {
-  int *vec = this->qvector();
-  int *mat = this->qmatrix();
+  char *vec = this->qvector();
+  char *mat = vec + v_size_;
 
   char *qlarge_mat = new char[num_input*num_output];
   char *qinput = new char[num_input];
@@ -144,9 +144,9 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
 }
 
 void FPGA::convLowering(const std::vector<std::vector<std::vector<std::vector<float>>>> &cnn_weights,
-                        std::vector<std::vector<float>> &new_weights,
-                        const std::vector<std::vector<std::vector<float>>> &inputs,
-                        std::vector<std::vector<float>> &new_inputs)
+    std::vector<std::vector<float>> &new_weights,
+    const std::vector<std::vector<std::vector<float>>> &inputs,
+    std::vector<std::vector<float>> &new_inputs)
 {
   /*
    * Arguments:

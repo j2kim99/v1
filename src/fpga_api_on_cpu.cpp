@@ -110,14 +110,6 @@ const float *FPGA::blockMV(Compute* comp)
   }
   else
   {
-    float vec_max = vec[0], vec_min = vec[0];
-    for(int i = 1; i < v_size_; i++){
-      if (vec_max < vec[i]) vec_max = vec[i];
-      if (vec_min > vec[i]) vec_min = vec[i];
-    }
-    if(num_block_call_ == 1)
-      printf("vec %f %f\n", vec_min, vec_max);
-
     for (int i = 0; i < m_size_; ++i)
     {
       out[i] = 0;
