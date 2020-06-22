@@ -7,10 +7,15 @@
 
 #define min(x, y) (((x) < (y)) ? (x) : (y))
 
+#define debugg
+
+#define V_SIZE 64
+#define M_SIZE 32
+
 FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
 {
-  m_size_ = 48;
-  v_size_ = 64;
+  m_size_ = min(M_SIZE, m_size);
+  v_size_ = min(V_SIZE, v_size);
   data_size_ = (m_size_ + 1) * v_size_ * sizeof(int); // fpga bram data size
 
   fd_ = open("/dev/mem", O_RDWR);
@@ -52,7 +57,7 @@ void quantize(const float* input, char* quantized, int num_input, int bits_min, 
   for(int i = 0; i < num_input; i++)
   {
     quantized[i] = 0; // TODO: convert floating point to quantized valuea
-    quantized[i] = (input[i]/scale) + offset;
+    quantized[i] = (input[i]/scale) ;
   }
 }
 
@@ -79,8 +84,8 @@ const int *__attribute__((optimize("O0"))) FPGA::qblockMV(Compute* comp)
 
 void FPGA::largeMV(const float *large_mat, const float *input, float *output, int num_input, int num_output, Compute* comp)
 {
-  char *vec = this->qvector();
-  char *mat = vec + v_size_;
+  char *vec = (char*)(qdata_);
+  char *mat = vec + V_SIZE;
 
   char *qlarge_mat = new char[num_input*num_output];
   char *qinput = new char[num_input];
@@ -94,6 +99,7 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
   int act_offset = 0; // TODO calculate the zero-offseta
   act_scale = (comp->act_max-comp->act_min)/(float)act_bits_max;
   act_offset=-(comp->act_min)/act_scale;
+  
   quantize(input, qinput, num_input, act_bits_min, act_bits_max, act_offset, act_scale);
 
   int weight_bits_min = 0;
@@ -103,6 +109,7 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
   int weight_offset = 0; // TODO calculate the zero-offset
   weight_scale = (comp->weight_max-comp->weight_min)/(float)weight_bits_max;
   weight_offset=-(comp->weight_min)/weight_scale;
+  
   quantize(large_mat, qlarge_mat, num_input*num_output, weight_bits_min, weight_bits_max, weight_offset, weight_scale);
 
   // 0) Initialize output vector
@@ -116,8 +123,8 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
       // 0) Initialize input vector
       int block_row = min(m_size_, num_output - i);
       int block_col = min(v_size_, num_input - j);
-      memset(vec, 0, sizeof(char)*v_size_);
-      memset(mat, 0, sizeof(char)*m_size_*v_size_);
+      memset(vec, 0, sizeof(char)*(V_SIZE));
+      memset(mat, 0, sizeof(char)*(M_SIZE*V_SIZE));
 
       // 1) Assign a vector
       // IMPLEMENT THIS
@@ -128,19 +135,79 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
       // IMPLEMENT THIS
 
       for(int r = 0; r < block_row; r++){
-        memcpy(mat+r*v_size_, qlarge_mat+(i+r)*num_input+j, sizeof(char)*block_col);
+        memcpy(mat+r*V_SIZE, qlarge_mat+(i+r)*num_input+j, sizeof(char)*block_col);
       }
+     
+     /*
+      for(int k = 0; k < V_SIZE; k++)
+        vec[k] -= act_offset;
+      for(int r = 0; r < M_SIZE; r++){
+        for(int c = 0; c < V_SIZE; c++)
+          mat[r*V_SIZE+c] -= weight_offset;
+      }
+      */
+
+#ifdef debug
+static int ttt = 0;
+ttt++;
+if(ttt < 300 && ttt%20 == 1){
+  printf("\n\n\n\n\nttt:%d\nbc:%d  br:%d\n\n",ttt, block_col, block_row);
+  for(int ii = 0; ii < 33; ii++){
+    printf("%d: ", ii);
+    for(int jj = 0; jj < 64; jj++)
+      printf("%d ", vec[ii*64+jj]);
+    printf("\n");
+  }
+
+}
+#endif
 
       // 3) Call a function `qblockMV() to execute MV multiplication
-      const int* ret = this->qblockMV(comp);
+      const short* ret = (short*)(this->qblockMV(comp));
+
+#ifdef debug
+if(ttt<300 && ttt%20 == 1){
+  printf("\nout: ");
+  for(int k = 0; k < m_size_; k++)
+    printf("%d ", ret[k]);
+  printf("\n\n");
+}
+#endif
 
       // 4) Accumulate intermediate results
       for(int row = 0; row < block_row; ++row)
-        qoutput[i + row] += ret[row];
+        qoutput[i + row] += (int)ret[row];
+
     }
   }
 
   dequantize(qoutput, output, num_output, 0, act_scale*weight_scale);
+
+#ifdef debug
+  if(num_block_call_ > 660){
+    printf("\n\n");
+    printf("nbc = %d\n", num_block_call_);
+    for(int i = 0; i < num_output; i++)
+      printf("%.3f ", output[i]);
+    printf("\n\nni %d  no %d\n\n", num_input, num_output);
+  }
+
+  if(num_block_call_ == 740){
+    printf("\n\nin: ");
+    for(int i = 0; i < num_input; i+=20){
+      printf("%.3f ", input[i]);
+      if(i%200 == 0)
+      printf("\n");
+      }
+    printf("\n");
+  }
+  if(num_block_call_ == 741){
+    printf("\n\nin: ");
+    for(int i = 0; i < num_input; i++)
+      printf("%.3f ", input[i]);
+    printf("\n");
+  }
+  #endif
 }
 
 void FPGA::convLowering(const std::vector<std::vector<std::vector<std::vector<float>>>> &cnn_weights,
